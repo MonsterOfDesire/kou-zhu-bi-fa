@@ -69,6 +69,7 @@ function App() {
   });
   const [activeLineId, setActiveLineId] = useState<number | null>(null);
   const [lastResult, setLastResult] = useState<PulseResult | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const startedAt = useRef(Date.now());
   const lineId = useRef(1);
   const selectedChannelRef = useRef<PlayerChannel>("group");
@@ -138,6 +139,7 @@ function App() {
     setUnreadChannels({ group: false, private: false });
     setActiveLineId(null);
     setLastResult(null);
+    setCopyStatus("idle");
     setTimeLeft(BRIEFING_SECONDS);
     setPhase("briefing");
     setScreen("game");
@@ -380,6 +382,62 @@ function App() {
     [chatLines, selectedChannel],
   );
 
+  const buildTranscriptText = () => {
+    const transcriptLines = chatLines.flatMap((line) => [
+      `[${line.clock}] [${channelLabels[line.channel]}] ${line.author}：${line.text}`,
+      ...(line.playerReaction ? [`  ↳ 你的反應：${line.playerReaction}`] : []),
+    ]);
+    const resultLines = records.map(
+      (record, index) =>
+        `${String(index + 1).padStart(2, "0")}. ${record.pulseId}｜${formatPoints(
+          record.result.points,
+        )}｜${record.result.feedback}`,
+    );
+    return [
+      "口誅筆伐｜社畜模式對話紀錄",
+      `總分：${totalScore.toLocaleString()} / ${maxScore.toLocaleString()}`,
+      `平均判斷：${formatSeconds(averageReaction)}`,
+      `正確判斷：${correctJudgements} / ${officeStream.length}`,
+      "",
+      "=== 對話紀錄 ===",
+      ...transcriptLines,
+      "",
+      "=== 判定摘要 ===",
+      ...(resultLines.length > 0 ? resultLines : ["尚無判定紀錄"]),
+      "",
+    ].join("\r\n");
+  };
+
+  const fallbackCopyText = (text: string) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  };
+
+  const copyTranscript = async () => {
+    const text = buildTranscriptText();
+    let copied = fallbackCopyText(text);
+
+    if (!copied && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+
+    setCopyStatus(copied ? "copied" : "failed");
+    window.setTimeout(() => setCopyStatus("idle"), 2400);
+  };
+
   const selectChannel = (channel: PlayerChannel) => {
     selectedChannelRef.current = channel;
     setSelectedChannel(channel);
@@ -466,6 +524,52 @@ function App() {
             </div>
           </div>
 
+          <section className="transcript-panel">
+            <div className="transcript-head">
+              <div>
+                <p className="panel-label">CHAT TRANSCRIPT</p>
+                <h2>對話歷程與判定</h2>
+              </div>
+              <button className="copy-button" type="button" onClick={copyTranscript}>
+                {copyStatus === "copied"
+                  ? "已複製"
+                  : copyStatus === "failed"
+                    ? "複製失敗"
+                    : "複製文字"}
+              </button>
+            </div>
+            <p className="copy-hint" aria-live="polite">
+              {copyStatus === "copied"
+                ? "已將完整對話與評價複製到剪貼簿。"
+                : copyStatus === "failed"
+                  ? "瀏覽器未允許存取剪貼簿，請稍後再試。"
+                  : "包含聊天室逐行記錄、你的反應與每則得分。"}
+            </p>
+            <div className="transcript-feed">
+              {chatLines.map((line) => (
+                <article className="transcript-line" key={line.id}>
+                  <small>
+                    {line.clock} · {channelLabels[line.channel]}
+                  </small>
+                  <strong>{line.author}</strong>
+                  <p>{line.text}</p>
+                  {line.playerReaction && <em>你的反應：{line.playerReaction}</em>}
+                </article>
+              ))}
+            </div>
+            <div className="result-history">
+              <p className="panel-label">逐則評價</p>
+              {records.map((record, index) => (
+                <article className="result-row" key={`${record.pulseId}-${index}`}>
+                  <b>{String(index + 1).padStart(2, "0")}</b>
+                  <div>
+                    <strong>{formatPoints(record.result.points)}</strong>
+                    <p>{record.result.feedback}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
           <button className="primary-button" type="button" onClick={startGame}>
             <span>再來一週</span>
             <i>ANOTHER SHIFT</i>
