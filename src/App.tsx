@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BRIEFING_SECONDS,
+  ROUND_PULSE_COUNT,
   RESPONSE_SECONDS,
   channelLabels,
   officeStream,
@@ -36,11 +37,13 @@ interface PulseResult {
 
 interface PulseRecord {
   pulseId: string;
+  answer: string;
   result: PulseResult;
 }
 
 const formatSeconds = (seconds: number) => `${seconds.toFixed(1)}s`;
 const formatPoints = (points: number) => `${points >= 0 ? "+" : ""}${points}`;
+const NOT_OCCURRED = "情境本次未發生";
 
 const getBeat = (pulse: OfficePulse) => {
   if (pulse.type !== "debate") return null;
@@ -53,6 +56,28 @@ const getPulseChannel = (pulse: OfficePulse): PlayerChannel =>
 const getPulseClock = (pulse: OfficePulse) =>
   pulse.type === "ambient" ? pulse.clock : getBeat(pulse)!.clock;
 
+const getPulseHeadline = (pulse: OfficePulse) =>
+  pulse.type === "ambient" ? pulse.headline : getBeat(pulse)!.headline;
+
+const getPulsePrompt = (pulse: OfficePulse) =>
+  pulse.type === "ambient"
+    ? `${pulse.author}：${pulse.text}`
+    : getBeat(pulse)!.incoming.map((message) => `${message.author}：${message.text}`).join(" / ");
+
+const selectRoundPulses = () => {
+  const rankedPulses = officeStream.map((pulse, index) => ({ index, pulse }));
+
+  for (let index = rankedPulses.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [rankedPulses[index], rankedPulses[swapIndex]] = [rankedPulses[swapIndex], rankedPulses[index]];
+  }
+
+  return rankedPulses
+    .slice(0, ROUND_PULSE_COUNT)
+    .sort((first, second) => first.index - second.index)
+    .map(({ pulse }) => pulse);
+};
+
 function App() {
   const [screen, setScreen] = useState<Screen>("intro");
   const [phase, setPhase] = useState<GamePhase>("briefing");
@@ -60,6 +85,7 @@ function App() {
   const [draft, setDraft] = useState("");
   const [fragments, setFragments] = useState<ReplyFragment[]>([]);
   const [timeLeft, setTimeLeft] = useState(BRIEFING_SECONDS);
+  const [roundPulses, setRoundPulses] = useState<OfficePulse[]>(selectRoundPulses);
   const [records, setRecords] = useState<PulseRecord[]>([]);
   const [chatLines, setChatLines] = useState<ChatLine[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<PlayerChannel>("group");
@@ -75,7 +101,7 @@ function App() {
   const selectedChannelRef = useRef<PlayerChannel>("group");
   const inputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const activePulse = officeStream[pulseIndex];
+  const activePulse = roundPulses[pulseIndex];
   const activeBeat = getBeat(activePulse);
   const activeChannel = getPulseChannel(activePulse);
 
@@ -95,7 +121,7 @@ function App() {
 
   const beginPulse = useCallback(
     (index: number) => {
-      const pulse = officeStream[index];
+      const pulse = roundPulses[index];
       const beat = getBeat(pulse);
       const incoming =
         pulse.type === "ambient"
@@ -116,7 +142,7 @@ function App() {
         setUnreadChannels((current) => ({ ...current, [channel]: true }));
       }
     },
-    [appendLines],
+    [appendLines, roundPulses],
   );
 
   const startGame = () => {
@@ -131,6 +157,7 @@ function App() {
         text: "工作通知已開啟。不是每一則訊息都值得長篇大論。",
       },
     ]);
+    setRoundPulses(selectRoundPulses());
     setPulseIndex(0);
     setDraft("");
     setFragments([]);
@@ -147,7 +174,7 @@ function App() {
   };
 
   const finishPulse = useCallback(
-    (result: PulseResult) => {
+    (result: PulseResult, answer: string) => {
       appendLines(
         [
           {
@@ -158,7 +185,7 @@ function App() {
         ],
         getPulseClock(activePulse),
       );
-      setRecords((current) => [...current, { pulseId: activePulse.id, result }]);
+      setRecords((current) => [...current, { pulseId: activePulse.id, answer, result }]);
       setLastResult(result);
       setDraft("");
       setTimeLeft(0);
@@ -191,19 +218,22 @@ function App() {
         ],
         activeBeat.clock,
       );
-      finishPulse({
-        points: score.total,
-        reactionSeconds: score.reactionSeconds,
-        correct: score.total >= 300 && score.reachedExpectedChannel,
-        feedback: `${matchText}｜頻道${score.reachedExpectedChannel ? "正確" : "錯誤"}`,
-        messageCount: score.messageCount,
-      });
+      finishPulse(
+        {
+          points: score.total,
+          reactionSeconds: score.reactionSeconds,
+          correct: score.total >= 300 && score.reachedExpectedChannel,
+          feedback: `${matchText}｜頻道${score.reachedExpectedChannel ? "正確" : "錯誤"}`,
+          messageCount: score.messageCount,
+        },
+        fragments.length > 0 ? fragments.map((fragment) => fragment.text).join(" / ") : "未回答",
+      );
     },
     [activeBeat, appendLines, finishPulse, fragments, phase],
   );
 
   const resolveQuickAction = useCallback(
-    (action: QuickAction, reaction?: ReactionEmoji) => {
+    (action: QuickAction, reaction?: ReactionEmoji, textReply?: string) => {
       if (phase !== "active") return;
 
       const reactionSeconds = Math.min(
@@ -213,6 +243,14 @@ function App() {
       const speedBonus = Math.round(
         90 * Math.max(0, (RESPONSE_SECONDS - reactionSeconds) / RESPONSE_SECONDS),
       );
+      const answer =
+        action === "read"
+          ? "已讀"
+          : action === "reaction"
+            ? reaction!
+            : action === "text"
+              ? textReply ?? "文字回覆"
+              : "未回答";
 
       if (action === "read" || action === "reaction") {
         setChatLines((current) =>
@@ -226,16 +264,19 @@ function App() {
 
       if (activePulse.type === "debate") {
         const label = action === "read" ? "只按已讀" : `只按 ${reaction}`;
-        finishPulse({
-          points: action === "timeout" ? -80 : -140,
-          reactionSeconds,
-          correct: false,
-          feedback:
-            action === "timeout"
-              ? "你讓不合理要求直接滑過去了"
-              : `${label}沒有守住工作界線，這則應該用文字回覆`,
-          messageCount: 0,
-        });
+        finishPulse(
+          {
+            points: action === "timeout" ? -80 : -140,
+            reactionSeconds,
+            correct: false,
+            feedback:
+              action === "timeout"
+                ? "你讓不合理要求直接滑過去了"
+                : `${label}沒有守住工作界線，這則應該用文字回覆`,
+            messageCount: 0,
+          },
+          answer,
+        );
         return;
       }
 
@@ -265,13 +306,16 @@ function App() {
                 : `判斷正確：${reaction} 放在這裡很自然`
               : `${reaction} 放在「${ambient.headline}」不太合時宜`;
 
-      finishPulse({
-        points,
-        reactionSeconds,
-        correct: isAccepted,
-        feedback,
-        messageCount: action === "text" ? 1 : 0,
-      });
+      finishPulse(
+        {
+          points,
+          reactionSeconds,
+          correct: isAccepted,
+          feedback,
+          messageCount: action === "text" ? 1 : 0,
+        },
+        answer,
+      );
     },
     [activeLineId, activePulse, finishPulse, phase],
   );
@@ -293,12 +337,13 @@ function App() {
         clock: getPulseClock(activePulse),
         text,
         isPlayer: true,
+        pulseId: activePulse.id,
       },
     ]);
     setDraft("");
 
     if (activePulse.type === "ambient") {
-      resolveQuickAction("text");
+      resolveQuickAction("text", undefined, text);
       return;
     }
 
@@ -333,7 +378,7 @@ function App() {
     if (screen !== "game" || phase !== "transition") return;
 
     const timer = window.setTimeout(() => {
-      if (pulseIndex === officeStream.length - 1) {
+      if (pulseIndex === roundPulses.length - 1) {
         setScreen("summary");
         return;
       }
@@ -341,7 +386,7 @@ function App() {
     }, 950);
 
     return () => window.clearTimeout(timer);
-  }, [beginPulse, phase, pulseIndex, screen]);
+  }, [beginPulse, phase, pulseIndex, roundPulses.length, screen]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -366,13 +411,19 @@ function App() {
     () => records.filter((record) => record.result.correct).length,
     [records],
   );
-  const maxScore =
+  const fullPoolMaxScore =
     scenario.beats.length * 1000 +
     officeStream.filter((pulse) => pulse.type === "ambient").length * 220;
+  const maxScore = roundPulses.reduce(
+    (sum, pulse) => sum + (pulse.type === "debate" ? 1000 : 220),
+    0,
+  );
   const title =
-    titleTiers.find((tier) => totalScore >= tier.minScore) ??
+    titleTiers.find(
+      (tier) => totalScore >= Math.round((tier.minScore / fullPoolMaxScore) * maxScore),
+    ) ??
     titleTiers[titleTiers.length - 1];
-  const progress = ((pulseIndex + 1) / officeStream.length) * 100;
+  const progress = ((pulseIndex + 1) / roundPulses.length) * 100;
   const timerProgress = (timeLeft / RESPONSE_SECONDS) * 100;
   const visibleChatLines = useMemo(
     () =>
@@ -381,23 +432,44 @@ function App() {
       ),
     [chatLines, selectedChannel],
   );
+  const recordByPulseId = useMemo(
+    () => new Map(records.map((record) => [record.pulseId, record])),
+    [records],
+  );
+  const reportRows = useMemo(
+    () =>
+      officeStream.map((pulse) => ({
+        headline: getPulseHeadline(pulse),
+        prompt: getPulsePrompt(pulse),
+        pulse,
+        record: recordByPulseId.get(pulse.id),
+      })),
+    [recordByPulseId],
+  );
 
   const buildTranscriptText = () => {
     const transcriptLines = chatLines.flatMap((line) => [
       `[${line.clock}] [${channelLabels[line.channel]}] ${line.author}：${line.text}`,
       ...(line.playerReaction ? [`  ↳ 你的反應：${line.playerReaction}`] : []),
     ]);
-    const resultLines = records.map(
-      (record, index) =>
-        `${String(index + 1).padStart(2, "0")}. ${record.pulseId}｜${formatPoints(
-          record.result.points,
-        )}｜${record.result.feedback}`,
+    const resultLines = reportRows.flatMap(
+      ({ headline, prompt, pulse, record }, index) => [
+        `${String(index + 1).padStart(2, "0")}. ${headline}｜${
+          pulse.type === "debate" ? "文字反擊" : "快速判斷"
+        }`,
+        `題目：${prompt}`,
+        `回應：${record?.answer ?? NOT_OCCURRED}`,
+        `評價：${
+          record ? `${formatPoints(record.result.points)}｜${record.result.feedback}` : NOT_OCCURRED
+        }`,
+        "",
+      ],
     );
     return [
       "口誅筆伐｜社畜模式對話紀錄",
       `總分：${totalScore.toLocaleString()} / ${maxScore.toLocaleString()}`,
       `平均判斷：${formatSeconds(averageReaction)}`,
-      `正確判斷：${correctJudgements} / ${officeStream.length}`,
+      `正確判斷：${correctJudgements} / ${roundPulses.length}`,
       "",
       "=== 對話紀錄 ===",
       ...transcriptLines,
@@ -464,13 +536,13 @@ function App() {
           <div className="scenario-panel">
             <p className="panel-label">本週訊息流</p>
             <h2>{scenario.title}</h2>
-            <p>混合不合理要求、日常通知與辦公室閒聊。判斷力和打字速度都會計分。</p>
+            <p>每局從 19 則題庫隨機抽選 10 則，混合不合理要求、日常通知與辦公室閒聊。</p>
           </div>
 
           <div className="rule-row">
             <div>
-              <b>{officeStream.length}</b>
-              <span>訊息脈衝</span>
+              <b>{ROUND_PULSE_COUNT}</b>
+              <span>隨機抽題</span>
             </div>
             <div>
               <b>30</b>
@@ -520,7 +592,7 @@ function App() {
             </div>
             <div>
               <span>正確判斷</span>
-              <strong>{correctJudgements} / {officeStream.length}</strong>
+              <strong>{correctJudgements} / {roundPulses.length}</strong>
             </div>
           </div>
 
@@ -558,13 +630,23 @@ function App() {
               ))}
             </div>
             <div className="result-history">
-              <p className="panel-label">逐則評價</p>
-              {records.map((record, index) => (
-                <article className="result-row" key={`${record.pulseId}-${index}`}>
+              <p className="panel-label">逐則評價 · 題庫固定排序</p>
+              {reportRows.map(({ headline, pulse, record }, index) => (
+                <article
+                  className={`result-row ${record ? "" : "result-row-muted"}`}
+                  key={pulse.id}
+                >
                   <b>{String(index + 1).padStart(2, "0")}</b>
                   <div>
-                    <strong>{formatPoints(record.result.points)}</strong>
-                    <p>{record.result.feedback}</p>
+                    <strong>{headline}</strong>
+                    <small>{pulse.type === "debate" ? "文字反擊" : "快速判斷"}</small>
+                    <p>回應：{record?.answer ?? NOT_OCCURRED}</p>
+                    <p>
+                      評價：
+                      {record
+                        ? `${formatPoints(record.result.points)}｜${record.result.feedback}`
+                        : NOT_OCCURRED}
+                    </p>
                   </div>
                 </article>
               ))}
@@ -640,7 +722,7 @@ function App() {
                 <h2>{channelLabels[selectedChannel]}</h2>
               </div>
               <div className="chat-timer">
-                <small>訊息 {pulseIndex + 1} / {officeStream.length}</small>
+                <small>訊息 {pulseIndex + 1} / {roundPulses.length}</small>
                 <strong className={timeLeft <= 3 && phase === "active" ? "danger" : ""}>
                   {phase === "transition" ? "下一則" : formatSeconds(timeLeft)}
                 </strong>

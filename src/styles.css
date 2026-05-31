@@ -951,11 +951,22 @@ input::placeholder {
   font-size: 0.76rem;
 }
 
+.result-row small {
+  display: block;
+  margin-top: 0.18rem;
+  color: #707a75;
+  font-size: 0.64rem;
+}
+
 .result-row p {
   margin: 0.2rem 0 0;
   color: #aab0aa;
   font-size: 0.72rem;
   line-height: 1.5;
+}
+
+.result-row-muted {
+  opacity: 0.58;
 }
 
 @media (max-width: 580px) {

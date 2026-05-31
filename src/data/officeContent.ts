@@ -1,5 +1,6 @@
 export const BRIEFING_SECONDS = 10;
 export const RESPONSE_SECONDS = 30;
+export const ROUND_PULSE_COUNT = 10;
 
 export type ChatChannel = "group" | "private" | "system";
 export type PlayerChannel = Exclude<ChatChannel, "system">;
