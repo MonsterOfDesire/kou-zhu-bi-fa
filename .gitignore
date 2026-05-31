@@ -1,0 +1,8 @@
+node_modules
+dist
+*.tsbuildinfo
+vite-out.log
+vite-err.log
+vite.config.js
+vite.config.d.ts
+kou-zhu-bi-fa-demo.zip
