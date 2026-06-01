@@ -170,8 +170,8 @@ export const officeScenes: ChatScene[] = [
     guidance: "指出範例與規格矛盾，要求需求端說明差異與重工成本。",
     hints: ["內容與範例一致", "要求規格與差異", "拒絕無效重工"],
     concepts: [
-      { label: "照範例製作", aliases: ["照範例", "參考資料", "一模一樣", "照你給的"] },
-      { label: "標準不一致", aliases: ["雙標", "標準", "前後不一", "規則變來變去"] },
+      { label: "照範例製作", aliases: ["照範例", "參考資料", "參考文件", "參考檔", "一模一樣", "照你給的", "你給什麼"] },
+      { label: "標準不一致", aliases: ["雙標", "標準", "前後不一", "規則變來變去", "自己說", "忘了", "亂丟"] },
       { label: "拒絕無效重工", aliases: ["重做", "重工", "浪費時間", "白做"] },
     ],
     events: [
@@ -193,9 +193,9 @@ export const officeScenes: ChatScene[] = [
     guidance: "切到 A主管私訊，要求釐清權責與優先順序。",
     hints: ["職務範圍", "權責分工", "請主管決定哪件延後"],
     concepts: [
-      { label: "職務範圍", aliases: ["職務範圍", "不是我的工作", "行政工作"] },
-      { label: "權責分工", aliases: ["分工", "權責", "誰負責", "找行政"] },
-      { label: "優先順序", aliases: ["優先順序", "先做哪個", "延後", "排程"] },
+      { label: "職務範圍", aliases: ["職務範圍", "不是我的工作", "行政工作", "本職工作"] },
+      { label: "權責分工", aliases: ["分工", "權責", "誰負責", "找行政", "誰做", "缺人招人", "沒人招人"] },
+      { label: "優先順序", aliases: ["優先順序", "先做哪個", "哪項工作優先", "哪像工作優先", "延後", "排程", "趕進度"] },
     ],
     events: [
       { delayMs: 0, author: "A主管", conversation: "private-a", text: "行政那邊缺人，你順便幫忙整理採購清單，很快。" },
@@ -216,8 +216,8 @@ export const officeScenes: ChatScene[] = [
     guidance: "要求正式說明駁回依據，並指出出包與人力規劃不是你的責任。",
     hints: ["事前請假", "他單位責任", "駁回依據"],
     concepts: [
-      { label: "事前請假", aliases: ["提前請假", "已經申請", "特休", "早就送出"] },
-      { label: "他單位責任", aliases: ["他們出包", "別的單位", "不關我的事", "填洞"] },
+      { label: "事前請假", aliases: ["提前請假", "事前就請假", "請假了", "已經申請", "特休", "早就送出"] },
+      { label: "他單位責任", aliases: ["他們出包", "別的單位", "隔壁單位", "進度問題", "管理不利", "不關我的事", "填洞"] },
       { label: "駁回依據", aliases: ["駁回依據", "正式說明", "理由", "書面"] },
     ],
     events: [
@@ -239,8 +239,8 @@ export const officeScenes: ChatScene[] = [
     guidance: "追問加班費、補休與重新估時，不必把變更成本默默吞掉。",
     hints: ["下班界線", "加班補償", "需求變更應重新估時"],
     concepts: [
-      { label: "下班界線", aliases: ["下班", "晚上", "明天", "非上班時間"] },
-      { label: "加班補償", aliases: ["加班費", "補休", "報加班", "工時"] },
+      { label: "下班界線", aliases: ["下班", "晚上", "明天", "非上班時間", "待機"] },
+      { label: "加班補償", aliases: ["加班", "加班費", "補休", "報加班", "工時", "補償"] },
       { label: "重新估時", aliases: ["估時", "調整期限", "改需求", "排程"] },
     ],
     events: [
@@ -601,12 +601,28 @@ export const officeScenes: ChatScene[] = [
 export const profanityKeywords = [
   "幹",
   "靠北",
+  "靠邀",
   "白癡",
   "智障",
   "媽的",
+  "你媽",
+  "三小",
+  "垃圾",
   "操你",
   "fuck",
   "shit",
+];
+
+export const unsafeLanguageKeywords = [
+  "殺你",
+  "弄死你",
+  "砍死你",
+  "去死",
+  "自殺",
+  "堵你",
+  "住址",
+  "地址",
+  "電話給我",
 ];
 
 export const hostileEmoji: ReactionEmoji[] = ["🙄", "😡", "💀"];

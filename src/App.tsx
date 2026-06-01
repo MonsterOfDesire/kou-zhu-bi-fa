@@ -348,6 +348,10 @@ function App() {
     () => records.filter((record) => record.result.correct).length,
     [records],
   );
+  const trashTalkScore = useMemo(
+    () => records.reduce((sum, record) => sum + record.result.trashTalkPoints, 0),
+    [records],
+  );
   const title =
     titleTiers.find((tier) => totalScore / Math.max(1, maxScore) >= tier.minRatio) ??
     titleTiers[titleTiers.length - 1];
@@ -411,6 +415,7 @@ function App() {
       `總分：${totalScore.toLocaleString()} / ${maxScore.toLocaleString()}`,
       `平均判斷：${formatSeconds(averageReaction)}`,
       `正確判斷：${correctJudgements} / ${roundScenes.length}`,
+      `嘴砲加成：+${trashTalkScore.toLocaleString()}`,
       "",
       "=== 對話紀錄 ===",
       ...transcriptLines,
@@ -464,7 +469,7 @@ function App() {
           </h1>
           <p className="intro-copy">
             工作群組與私訊會交錯跳出。每一局都是一段忙亂的聊天室。
-            <strong>切分頁、連發短句、丟 emoji，再自己決定何時收尾。</strong>
+            <strong>切分頁、連發短句、丟 emoji，再自己決定何時收尾。攻防題也接受有節奏的嘴砲路線。</strong>
           </p>
           <div className="scenario-panel">
             <p className="panel-label">本週聊天室</p>
@@ -527,6 +532,10 @@ function App() {
               <strong>
                 {correctJudgements} / {roundScenes.length}
               </strong>
+            </div>
+            <div>
+              <span>嘴砲加成</span>
+              <strong>+{trashTalkScore.toLocaleString()}</strong>
             </div>
           </div>
           <section className="transcript-panel">
@@ -802,6 +811,12 @@ function App() {
               <span>回覆方向</span>
               <p>{activeScene.guidance}</p>
             </div>
+            {activeScene.kind === "conflict" && (
+              <div>
+                <span>嘴砲路線</span>
+                <p>反問、短句連發、有梗嘲諷與 emoji 節奏也能加分；威脅與個資式內容仍會扣分。</p>
+              </div>
+            )}
             <div>
               <span>可用節奏</span>
               <ul>
