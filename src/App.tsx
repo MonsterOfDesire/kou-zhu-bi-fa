@@ -33,6 +33,7 @@ interface ChatLine extends ScriptMessage {
   sceneId?: string;
   isPlayer?: boolean;
   kind?: FragmentKind;
+  pasted?: boolean;
 }
 
 interface SceneRecord {
@@ -68,7 +69,6 @@ const selectRoundScenes = () => {
 
   return rankedScenes
     .slice(0, ROUND_SCENE_COUNT)
-    .sort((first, second) => first.index - second.index)
     .map(({ scene }) => scene);
 };
 
@@ -90,13 +90,16 @@ function App() {
   const startedAt = useRef(Date.now());
   const lineId = useRef(1);
   const selectedConversationRef = useRef<PlayerConversationId>("group");
+  const draftWasPasted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const activeScene = roundScenes[sceneIndex];
 
   const appendLines = useCallback(
     (
-      messages: Array<ScriptMessage & { isPlayer?: boolean; kind?: FragmentKind }>,
+      messages: Array<
+        ScriptMessage & { isPlayer?: boolean; kind?: FragmentKind; pasted?: boolean }
+      >,
       clock: string,
       sceneId?: string,
     ) => {
@@ -134,6 +137,7 @@ function App() {
       const scene = roundScenes[index];
       setSceneIndex(index);
       setDraft("");
+      draftWasPasted.current = false;
       setFragments([]);
       setTimeLeft(RESPONSE_SECONDS);
       setPhase("active");
@@ -160,6 +164,7 @@ function App() {
     setRoundScenes(selectRoundScenes());
     setSceneIndex(0);
     setDraft("");
+    draftWasPasted.current = false;
     setFragments([]);
     selectedConversationRef.current = "group";
     setSelectedConversation("group");
@@ -208,6 +213,7 @@ function App() {
       ]);
       setLastResult(result);
       setDraft("");
+      draftWasPasted.current = false;
       setTimeLeft(0);
       setPhase("transition");
     },
@@ -215,7 +221,7 @@ function App() {
   );
 
   const sendFragment = useCallback(
-    (kind: FragmentKind, text: string) => {
+    (kind: FragmentKind, text: string, pasted = false) => {
       if (phase !== "active") return;
 
       const sentAtSeconds = Math.min(
@@ -227,6 +233,7 @@ function App() {
         text,
         sentAtSeconds,
         conversation: selectedConversation,
+        pasted,
       };
       setFragments((current) => [...current, fragment]);
       appendLines(
@@ -237,6 +244,7 @@ function App() {
             text,
             isPlayer: true,
             kind,
+            pasted,
           },
         ],
         activeScene.clock,
@@ -250,8 +258,9 @@ function App() {
   const submitText = useCallback(() => {
     const text = draft.trim();
     if (text.length === 0) return;
-    sendFragment("text", text);
+    sendFragment("text", text, draftWasPasted.current);
     setDraft("");
+    draftWasPasted.current = false;
   }, [draft, sendFragment]);
 
   const sendEmoji = (emoji: ReactionEmoji) => sendFragment("emoji", emoji);
@@ -371,7 +380,9 @@ function App() {
         ? record.fragments
             .map(
               (fragment) =>
-                `[${conversationLabels[fragment.conversation]}] ${fragment.text}`,
+                `[${conversationLabels[fragment.conversation]}] ${fragment.text}${
+                  fragment.pasted ? " [貼上]" : ""
+                }`,
             )
             .join(" / ")
         : "未回答"
@@ -380,7 +391,9 @@ function App() {
   const buildTranscriptText = () => {
     const transcriptLines = chatLines.map(
       (line) =>
-        `[${line.clock}] [${conversationLabels[line.conversation]}] ${line.author}：${line.text}`,
+        `[${line.clock}] [${conversationLabels[line.conversation]}] ${line.author}：${line.text}${
+          line.pasted ? " [貼上]" : ""
+        }`,
     );
     const resultLines = reportRows.flatMap(({ scene, record }, index) => [
       `${String(index + 1).padStart(2, "0")}. ${scene.headline}｜${getSceneKindLabel(scene)}`,
@@ -615,7 +628,7 @@ function App() {
             <span>本週設定</span>
             <p>
               每個情境持續 30 秒。文字、emoji 與已讀都可以連續送出，
-              按「結束回覆」才會進入下一則。
+              按「結束回覆」才會進入下一則。貼上可以玩梗，但不計手速且限制最高分。
             </p>
           </div>
           <div className="control-grid">
@@ -695,6 +708,7 @@ function App() {
                   <strong>{line.author}</strong>
                   <div className="chat-message">
                     <p>{line.text}</p>
+                    {line.pasted && <span className="paste-chip">貼上</span>}
                   </div>
                 </div>
               ))}
@@ -705,7 +719,7 @@ function App() {
                 <span className="composer-channel">
                   [{conversationLabels[selectedConversation]}]
                 </span>
-                <small>可以連發短句、emoji 或已讀；送錯聊天室會扣分</small>
+                <small>可以貼上玩梗，但貼上文字不計手速且限制最高分</small>
               </div>
               <div className="emoji-picker" aria-label="emoji 快速訊息">
                 {reactionOptions.map((emoji) => (
@@ -725,7 +739,13 @@ function App() {
                 value={draft}
                 maxLength={72}
                 disabled={phase !== "active"}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  if (event.target.value.length === 0) draftWasPasted.current = false;
+                }}
+                onPaste={() => {
+                  draftWasPasted.current = true;
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                     event.preventDefault();

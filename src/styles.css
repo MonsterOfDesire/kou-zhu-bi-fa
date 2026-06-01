@@ -1281,6 +1281,18 @@ input::placeholder {
   min-width: 0;
 }
 
+.paste-chip {
+  display: inline-block;
+  margin-top: 0.28rem;
+  padding: 0.1rem 0.32rem;
+  color: #e1c884;
+  font-size: 0.58rem;
+  font-weight: 800;
+  background: rgba(198, 147, 55, 0.1);
+  border: 1px solid rgba(198, 147, 55, 0.24);
+  border-radius: 999px;
+}
+
 .reaction-chip {
   display: inline-block;
   margin-top: 0.35rem;

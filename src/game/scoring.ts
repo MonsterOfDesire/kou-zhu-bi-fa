@@ -16,6 +16,7 @@ export interface ChatFragment {
   sentAtSeconds: number;
   conversation: PlayerConversationId;
   kind: FragmentKind;
+  pasted?: boolean;
 }
 
 export interface SceneScore {
@@ -26,6 +27,7 @@ export interface SceneScore {
   matchedConcepts: string[];
   reachedExpectedConversation: boolean;
   hasProfanity: boolean;
+  pastedMessageCount: number;
   correct: boolean;
   feedback: string;
   scriptReply?: string;
@@ -41,7 +43,9 @@ const conceptMatches = (reply: string, concept: AcceptedConcept) =>
   concept.aliases.some((alias) => reply.includes(normalize(alias)));
 
 const calculateTempo = (fragments: ChatFragment[]) => {
-  const messages = fragments.filter((fragment) => fragment.kind !== "read");
+  const messages = fragments.filter(
+    (fragment) => fragment.kind !== "read" && !fragment.pasted,
+  );
   if (messages.length < 2) return 0;
 
   const gaps = messages
@@ -84,7 +88,9 @@ const scoreConflict = (
   const hasProfanity = profanityKeywords.some((keyword) =>
     textReply.includes(normalize(keyword)),
   );
-  const reactionSeconds = fragments[0]?.sentAtSeconds ?? RESPONSE_SECONDS;
+  const pastedMessageCount = fragments.filter((fragment) => fragment.pasted).length;
+  const reactionSeconds =
+    fragments.find((fragment) => !fragment.pasted)?.sentAtSeconds ?? RESPONSE_SECONDS;
   const reachedExpectedConversation = relevant.length > 0;
   const wrongConversationCount = fragments.length - relevant.length;
   const acceptedEmojiCount = relevant.filter(
@@ -105,9 +111,13 @@ const scoreConflict = (
   const channel = reachedExpectedConversation ? 95 : fragments.length > 0 ? -160 : 0;
   const penalties =
     wrongConversationCount * -45 + (offTopic ? -100 : 0) + (hasProfanity ? -70 : 0);
-  const total = Math.max(
+  const rawTotal = Math.max(
     0,
     Math.min(maxScore, reaction + tempo + substance + concepts + tone + channel + penalties),
+  );
+  const total = Math.min(
+    rawTotal,
+    pastedMessageCount > 0 ? Math.round(maxScore * 0.6) : maxScore,
   );
   const correct =
     reachedExpectedConversation &&
@@ -130,6 +140,7 @@ const scoreConflict = (
             : "沒有打中矛盾核心",
           reachedExpectedConversation ? "聊天室正確" : "聊天室錯誤",
           hasProfanity ? "語氣過重略扣分" : null,
+          pastedMessageCount > 0 ? "貼上內容不計手速，得分上限 60%" : null,
         ]
           .filter(Boolean)
           .join("｜");
@@ -142,6 +153,7 @@ const scoreConflict = (
     matchedConcepts,
     reachedExpectedConversation,
     hasProfanity,
+    pastedMessageCount,
     correct,
     feedback,
     scriptReply: choose(scene.responses?.[responseType], scene.id.length + characterCount),
@@ -177,8 +189,10 @@ const scoreConversation = (
   const hasProfanity = profanityKeywords.some((keyword) =>
     textReply.includes(normalize(keyword)),
   );
+  const pastedMessageCount = fragments.filter((fragment) => fragment.pasted).length;
   const reachedExpectedConversation = relevant.length > 0;
-  const reactionSeconds = fragments[0]?.sentAtSeconds ?? RESPONSE_SECONDS;
+  const reactionSeconds =
+    fragments.find((fragment) => !fragment.pasted)?.sentAtSeconds ?? RESPONSE_SECONDS;
   const wrongConversationCount = fragments.length - relevant.length;
   const reaction =
     fragments.length === 0
@@ -201,7 +215,14 @@ const scoreConversation = (
     hostileEmojiCount * -75 +
     (hasProfanity ? -190 : 0) +
     Math.max(0, relevant.length - overReplyLimit) * -28;
-  const total = Math.max(0, Math.min(maxScore, reaction + read + emoji + text + tempo + penalties));
+  const rawTotal = Math.max(
+    0,
+    Math.min(maxScore, reaction + read + emoji + text + tempo + penalties),
+  );
+  const total = Math.min(
+    rawTotal,
+    pastedMessageCount > 0 ? Math.round(maxScore * 0.6) : maxScore,
+  );
   const correct =
     (reachedExpectedConversation || (fragments.length === 0 && Boolean(scene.allowSilence))) &&
     !hasProfanity &&
@@ -225,6 +246,7 @@ const scoreConversation = (
           acceptedEmojiCount > 0 ? `合宜 emoji × ${acceptedEmojiCount}` : null,
           friendlyHit ? "文字語氣自然" : textReply.length > 0 ? "已記錄文字回覆" : null,
           hostileEmojiCount > 0 || hasProfanity ? "普通聊天不需要開戰" : null,
+          pastedMessageCount > 0 ? "貼上內容不計手速，得分上限 60%" : null,
         ]
           .filter(Boolean)
           .join("｜");
@@ -237,6 +259,7 @@ const scoreConversation = (
     matchedConcepts: [],
     reachedExpectedConversation,
     hasProfanity,
+    pastedMessageCount,
     correct,
     feedback,
     scriptReply:
