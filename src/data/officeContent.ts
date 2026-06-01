@@ -1,16 +1,38 @@
 export const BRIEFING_SECONDS = 10;
 export const RESPONSE_SECONDS = 30;
-export const ROUND_PULSE_COUNT = 10;
+export const ROUND_SCENE_COUNT = 10;
 
-export type ChatChannel = "group" | "private" | "system";
-export type PlayerChannel = Exclude<ChatChannel, "system">;
-export type ReplyTier = "excellent" | "good" | "weak";
-export type ReactionEmoji = "👍" | "🙂" | "🙄" | "😅" | "🙏" | "？";
+export type ConversationId =
+  | "group"
+  | "private-a"
+  | "private-b"
+  | "private-c"
+  | "system";
+export type PlayerConversationId = Exclude<ConversationId, "system">;
+export type SceneKind = "conflict" | "casual" | "notice";
+export type ReplyTier = "excellent" | "good" | "weak" | "wrongChannel" | "silence";
+export type ReactionEmoji =
+  | "👍"
+  | "🙂"
+  | "🙄"
+  | "😅"
+  | "🙏"
+  | "❓"
+  | "❤️"
+  | "👌"
+  | "🎉"
+  | "😂"
+  | "😡"
+  | "💀";
 
 export interface ScriptMessage {
   author: string;
-  channel: ChatChannel;
+  conversation: ConversationId;
   text: string;
+}
+
+export interface ChatEvent extends ScriptMessage {
+  delayMs: number;
 }
 
 export interface AcceptedConcept {
@@ -18,427 +40,562 @@ export interface AcceptedConcept {
   aliases: string[];
 }
 
-export interface DialogueBeat {
-  id: number;
+export interface ChatScene {
+  id: string;
   clock: string;
+  kind: SceneKind;
   headline: string;
   situation: string;
-  weakness: string;
+  guidance: string;
   hints: string[];
   concepts: AcceptedConcept[];
-  incoming: ScriptMessage[];
-  expectedChannel: PlayerChannel;
-  responseAuthor: string;
-  responses: Record<ReplyTier | "wrongChannel" | "silence", string[]>;
+  events: ChatEvent[];
+  expectedConversation: PlayerConversationId;
+  acceptedEmoji: ReactionEmoji[];
+  allowRead: boolean;
+  allowSilence?: boolean;
+  friendlyKeywords?: string[];
+  responseAuthor?: string;
+  responses?: Partial<Record<ReplyTier, string[]>>;
+}
+
+export interface ConversationTab {
+  id: PlayerConversationId;
+  label: string;
+  subtitle: string;
+  avatar: string;
 }
 
 export interface TitleTier {
-  minScore: number;
+  minRatio: number;
   title: string;
   description: string;
 }
 
-export interface DebatePulse {
-  id: string;
-  type: "debate";
-  beatId: number;
-}
+export const conversationTabs: ConversationTab[] = [
+  { id: "group", label: "專案群組", subtitle: "全體工作訊息", avatar: "#" },
+  { id: "private-a", label: "A主管", subtitle: "主管 · 私訊", avatar: "A" },
+  { id: "private-b", label: "B同事", subtitle: "同事 · 私訊", avatar: "B" },
+  { id: "private-c", label: "C同事", subtitle: "同事 · 私訊", avatar: "C" },
+];
 
-export interface AmbientPulse {
-  id: string;
-  type: "ambient";
-  clock: string;
-  author: string;
-  channel: PlayerChannel;
-  text: string;
-  headline: string;
-  situation: string;
-  guidance: string;
-  allowRead: boolean;
-  acceptedReactions: ReactionEmoji[];
-}
-
-export type OfficePulse = DebatePulse | AmbientPulse;
-
-export const reactionOptions: ReactionEmoji[] = ["👍", "🙂", "🙄", "😅", "🙏", "？"];
-
-export const channelLabels: Record<ChatChannel, string> = {
+export const conversationLabels: Record<ConversationId, string> = {
   group: "專案群組",
-  private: "私訊",
+  "private-a": "A主管｜私訊",
+  "private-b": "B同事｜私訊",
+  "private-c": "C同事｜私訊",
   system: "系統",
 };
 
-const managerResponses = {
+export const reactionOptions: ReactionEmoji[] = [
+  "👍",
+  "🙂",
+  "🙄",
+  "😅",
+  "🙏",
+  "❓",
+  "❤️",
+  "👌",
+  "🎉",
+  "😂",
+  "😡",
+  "💀",
+];
+
+const managerResponses: Record<ReplyTier, string[]> = {
   excellent: ["……好，我把優先順序寫清楚。", "收到。這件事我再重新確認安排。"],
   good: ["好，晚點再確認。", "收到，你先照目前排程走。"],
   weak: ["先把事情處理完再討論。", "你這樣回覆沒有解決問題。"],
-  wrongChannel: ["[系統] 對方沒有收到你在另一個對話框裡的回覆。"],
-  silence: ["[系統] 你沒有回應。新的工作仍然被塞進排程。"],
+  wrongChannel: ["[系統] 你回在別的聊天室，當事人沒有收到。"],
+  silence: ["[系統] 你沒有回應，新的工作仍然被塞進排程。"],
 };
 
-const coworkerResponses = {
+const coworkerResponses: Record<ReplyTier, string[]> = {
   excellent: ["好，那我自己處理。", "了解，我再回去確認分工。"],
   good: ["行，我再問看看。", "好，那先照原本分工。"],
   weak: ["只是請你幫個忙而已。", "算了，我再找別人。"],
-  wrongChannel: ["[系統] 你把私下要說的話丟進群組，整間辦公室都看見了。"],
-  silence: ["[系統] 你沒有回應。對方暫時把工作留在你桌上。"],
+  wrongChannel: ["[系統] 你把私下要說的話丟進另一個聊天室了。"],
+  silence: ["[系統] 你沒有回應，對方暫時把工作留在你桌上。"],
+};
+
+const casualResponses: Record<ReplyTier, string[]> = {
+  excellent: ["可以啊，我晚點揪你。", "好，收到。"],
+  good: ["好喔。", "沒問題。"],
+  weak: ["你是不是回錯人了？", "呃，好。"],
+  wrongChannel: ["[系統] 閒聊送錯聊天室，氣氛突然有點尷尬。"],
+  silence: ["[系統] 你忙著工作，沒有回覆這則閒聊。"],
 };
 
 export const scenario = {
-  title: "社畜模式 · 一週訊息轟炸",
+  title: "社畜模式 · 一週聊天室",
   description:
-    "主管、同事與跨部門窗口會輪流丟出不合理要求。你的目標不是禮貌作文，而是在限時內抓住矛盾、快速連發、守住自己的排程。",
-  openingSituation:
-    "週一中午，你原本只想安靜吃飯。工作群組卻開始跳出訊息，接下來幾天的雙標、甩鍋、臨時加班與跨部門支援會一路排隊找上門。",
+    "工作群組、主管私訊與同事閒聊會混在一起。你可以連發短句、emoji 或已讀，抓準聊天室與語氣再結束回覆。",
   controls: [
-    "點選分頁：切換專案群組與私訊聊天室",
-    "一般訊息：在原文下方選擇已讀或合宜表情",
-    "不合理要求：輸入文字連發，再按「送出這波」",
+    "左側分頁：切換群組與每位聯絡人的獨立私訊",
+    "文字與 emoji：都可以連續送出，不會立即結束情境",
+    "結束回覆：確認這波內容，或等待 30 秒自動結算",
   ],
-  beats: [
-    {
-      id: 1,
-      clock: "週一 12:03",
-      headline: "午休被追資料",
-      situation:
-        "現在是午休時間。主管早上沒有說明期限，卻臨時要求你在 13:00 前整理資料，等於直接吃掉個人休息時間。",
-      weakness: "急件不是問題；沒有事先排程，還把臨時需求包裝成理所當然，才是破口。",
-      hints: ["主張午休是休息時間", "提醒需求應提前排程", "用勞動規範與資遣成本收尾"],
-      concepts: [
-        { label: "午休界線", aliases: ["午休", "休息時間", "中午休息", "吃飯", "不用午休", "不用休息"] },
-        { label: "臨時排程", aliases: ["臨時", "早上不講", "提前說", "排程", "急什麼", "現在才說"] },
-        { label: "勞動規範", aliases: ["勞基法", "勞工局", "檢舉", "申訴", "違法"] },
-        { label: "資遣成本", aliases: ["資遣", "資遣費", "開除", "不爽資遣", "不爽開除"] },
-        { label: "停止催促", aliases: ["閉嘴", "乖乖等", "不要吵", "bb什麼", "催什麼"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "group", text: "下午開會要用的資料呢？中午整理一下，13:00 前丟群組。" },
-      ],
-      expectedChannel: "group",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 2,
-      clock: "週一 13:24",
-      headline: "範例突然不算範例",
-      situation:
-        "你完全照主管提供的參考檔格式交件。主管卻在群組說不能這樣寫，要求全部重做，彷彿那份範例從來不存在。",
-      weakness: "如果範例不能照著用，提供範例的人就應該先說明差異，而不是事後把重工責任推給執行者。",
-      hints: ["指出內容與範例一致", "要求明確規格與差異", "把重工成本退回需求端"],
-      concepts: [
-        { label: "照範例製作", aliases: ["照範例", "參考資料", "一模一樣", "照你給的", "範例檔"] },
-        { label: "標準不一致", aliases: ["雙標", "不能這樣寫", "標準", "前後不一", "規則變來變去"] },
-        { label: "規格說清楚", aliases: ["規格", "講清楚", "差異", "哪裡不一樣", "先說明"] },
-        { label: "拒絕無效重工", aliases: ["重做", "重工", "浪費時間", "白做", "你改"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "group", text: "這個格式誰叫你照參考檔寫的？不能這樣交，全部重弄。" },
-      ],
-      expectedChannel: "group",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 3,
-      clock: "週一 14:08",
-      headline: "順便幫忙變成常駐工作",
-      situation:
-        "主管私訊要求你整理行政單位的採購清單。這不在原本職務範圍內，而且你手上的正式工作還沒完成。",
-      weakness: "所謂順便幫忙會吃掉既有工作時間。至少應先釐清權責、優先順序與由誰承擔延誤。",
-      hints: ["切到私訊分頁回覆主管", "要求釐清職務範圍", "請主管明確決定哪件工作延後"],
-      concepts: [
-        { label: "職務範圍", aliases: ["職務範圍", "工作範圍", "不是我的工作", "職缺內容", "行政工作"] },
-        { label: "權責分工", aliases: ["分工", "權責", "行政單位", "誰負責", "找行政"] },
-        { label: "優先順序", aliases: ["優先順序", "先做哪個", "排程", "延後", "哪件先做"] },
-        { label: "延誤責任", aliases: ["延誤", "進度", "誰承擔", "不要怪我", "影響期限"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "private", text: "行政那邊缺人，你順便幫忙整理採購清單，很快。" },
-      ],
-      expectedChannel: "private",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 4,
-      clock: "週一 15:36",
-      headline: "別人的出包變成你的假",
-      situation:
-        "你已提前送出特休申請。主管卻因為其他單位進度落後，要求你取消請假去支援；落後原因與你無關。",
-      weakness: "跨部門出包應處理根因與人力規劃，不應直接拿已安排的個人假期填洞。",
-      hints: ["強調請假已提前提出", "指出進度落後是其他單位責任", "要求正式說明駁回依據"],
-      concepts: [
-        { label: "事前請假", aliases: ["提前請假", "已經申請", "特休", "排好", "早就送出"] },
-        { label: "他單位責任", aliases: ["他們的包", "別的單位", "他們落後", "不關我的事", "他們出包"] },
-        { label: "人力調度失敗", aliases: ["人力調度", "缺人", "找人支援", "人力規劃", "填洞"] },
-        { label: "駁回依據", aliases: ["駁回依據", "正式說明", "理由", "依據", "請用書面"] },
-        { label: "勞動權益", aliases: ["特休", "勞基法", "勞工局", "申訴", "違法"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "private", text: "你下週的假先不要排。隔壁單位進度落後，需要你支援。" },
-      ],
-      expectedChannel: "private",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 5,
-      clock: "週一 18:12",
-      headline: "下班前五分鐘的急件",
-      situation:
-        "你已準備下班。主管才說客戶下午改了需求，要求今晚完成，卻沒有提加班費、補休或隔日調整。",
-      weakness: "需求變更應重新估時。把延誤直接塞進下班後，只是把管理成本轉嫁給員工。",
-      hints: ["先問加班費或補休", "要求重新估時與調整期限", "指出需求變更不是免費加班理由"],
-      concepts: [
-        { label: "下班界線", aliases: ["下班", "晚上", "非上班時間", "明天", "今天做不完"] },
-        { label: "加班補償", aliases: ["加班費", "補休", "報加班", "加班", "工時"] },
-        { label: "需求變更", aliases: ["改需求", "需求變更", "客戶改", "新增內容", "變更"] },
-        { label: "重新估時", aliases: ["估時", "延期限", "調整期限", "排程", "明天交"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "group", text: "客戶剛改需求。大家今天先別走，晚上處理完再下班。" },
-      ],
-      expectedChannel: "group",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 6,
-      clock: "週二 09:05",
-      headline: "需求模糊但責任精準",
-      situation:
-        "昨天主管只用一句口頭描述交辦。今天看到結果後，卻問你為什麼沒有先確認，像是完整規格早就存在。",
-      weakness: "需求沒有文件、驗收標準與版本紀錄，就不能把認知差異全部算成執行失誤。",
-      hints: ["要求書面規格與驗收標準", "指出昨天沒有明確需求", "保留變更紀錄避免甩鍋"],
-      concepts: [
-        { label: "需求不清", aliases: ["需求不清楚", "沒講清楚", "口頭", "沒規格", "沒有說"] },
-        { label: "書面規格", aliases: ["書面", "規格", "文件", "驗收標準", "需求單"] },
-        { label: "版本紀錄", aliases: ["紀錄", "版本", "留存", "變更紀錄", "mail"] },
-        { label: "拒絕甩鍋", aliases: ["甩鍋", "怪我", "責任", "不要推給我", "誰交代的"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "group", text: "這不是我要的。你做之前怎麼都不先確認？" },
-      ],
-      expectedChannel: "group",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 7,
-      clock: "週二 10:40",
-      headline: "幫一次就變固定班底",
-      situation:
-        "同事上週請你代做週報，這週又私訊說你比較熟，要你順便處理。他已經把臨時幫忙當成固定分工。",
-      weakness: "協助不是無限續約。重複性的工作應回到原負責人，或正式調整職務分配。",
-      hints: ["切到私訊分頁回覆同事", "說明幫忙不是固定分工", "請對方自己處理或正式提調整"],
-      concepts: [
-        { label: "幫忙不是常態", aliases: ["上次幫忙", "不是每次", "幫一次", "不要當常態", "順便"] },
-        { label: "回到原負責人", aliases: ["你自己做", "自己處理", "原本是你的", "你負責", "不是我負責"] },
-        { label: "正式調整分工", aliases: ["調整分工", "正式提出", "找主管", "重新分工", "工作分配"] },
-        { label: "自己也有進度", aliases: ["我也有工作", "我的進度", "沒空", "排程", "我手上"] },
-      ],
-      incoming: [
-        { author: "B同事", channel: "private", text: "你上週做過了比較熟，這次週報也順便幫我弄一下，很快啦。" },
-      ],
-      expectedChannel: "private",
-      responseAuthor: "B同事",
-      responses: coworkerResponses,
-    },
-    {
-      id: 8,
-      clock: "週二 14:20",
-      headline: "會議塞滿再問進度",
-      situation:
-        "主管臨時拉你開了兩個小時的會，現在又在群組追問原定下午完成的報告。工作時間沒有增加。",
-      weakness: "會議與產出都會吃時間。若兩者衝突，主管應明確決定優先順序，而不是同時催收。",
-      hints: ["指出臨時會議佔用時間", "要求決定會議或交付誰優先", "請主管接受調整後期限"],
-      concepts: [
-        { label: "會議佔時", aliases: ["開會", "會議", "兩小時", "佔用時間", "剛剛在會議"] },
-        { label: "排程衝突", aliases: ["衝突", "時間不會變多", "同時做", "分身", "排程"] },
-        { label: "決定優先順序", aliases: ["優先順序", "哪個優先", "先做哪個", "二選一", "請決定"] },
-        { label: "調整期限", aliases: ["延後", "期限", "晚點交", "明天", "重新排"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "group", text: "下午那份報告怎麼還沒看到？這個進度有點慢。" },
-      ],
-      expectedChannel: "group",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 9,
-      clock: "週三 16:10",
-      headline: "成果往上收，問題往下丟",
-      situation:
-        "專案順利的部分被主管說成自己帶得好；出了問題的部分，卻被說成執行細節，要你自行修正。",
-      weakness: "如果主管要認領成果，就不能在出問題時把決策責任全部切回基層執行者。",
-      hints: ["要求責任與成果一起計算", "拿出決策與版本紀錄", "拒絕只背問題不分成果"],
-      concepts: [
-        { label: "成果責任對等", aliases: ["成果", "責任", "一起算", "有功", "出事"] },
-        { label: "決策紀錄", aliases: ["紀錄", "版本", "mail", "你決定的", "會議紀錄"] },
-        { label: "拒絕甩鍋", aliases: ["甩鍋", "只怪我", "推給我", "執行細節", "背鍋"] },
-        { label: "主管也要承擔", aliases: ["你也要負責", "主管負責", "誰帶的", "帶專案", "決策責任"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "group", text: "方向是我帶得沒問題。現在這個錯誤是執行細節，你修一下。" },
-      ],
-      expectedChannel: "group",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-    {
-      id: 10,
-      clock: "週五 16:55",
-      headline: "週末支援叫做團隊共識",
-      situation:
-        "週五下班前，主管突然要求大家週末上線支援，並用團隊共識淡化工時與補償問題。",
-      weakness: "若是公司要求的工作，就應明確排班並處理加班補償；不能只靠情緒壓力讓人免費待命。",
-      hints: ["確認是否正式排班", "追問加班費或補休", "拒絕把免費待命包裝成共識"],
-      concepts: [
-        { label: "週末界線", aliases: ["週末", "休假", "假日", "下班", "待命"] },
-        { label: "正式排班", aliases: ["排班", "正式", "值班", "誰上線", "輪班"] },
-        { label: "加班補償", aliases: ["加班費", "補休", "報加班", "工時", "補償"] },
-        { label: "拒絕情緒施壓", aliases: ["共識", "免費", "情緒勒索", "義務", "自願"] },
-      ],
-      incoming: [
-        { author: "A主管", channel: "group", text: "週末大家上線支援一下，團隊共識，不用每件事都算那麼細。" },
-      ],
-      expectedChannel: "group",
-      responseAuthor: "A主管",
-      responses: managerResponses,
-    },
-  ] satisfies DialogueBeat[],
 };
 
-export const officeStream: OfficePulse[] = [
-  { id: "debate-1", type: "debate", beatId: 1 },
+export const officeScenes: ChatScene[] = [
+  {
+    id: "lunch-data",
+    clock: "週一 12:03",
+    kind: "conflict",
+    headline: "午休被追資料",
+    situation: "主管早上沒有說明期限，卻在午休時要求你於 13:00 前交資料。",
+    guidance: "指出午休界線、臨時排程與合理期限。群組裡可能會有同事補充現況。",
+    hints: ["午休是休息時間", "需求應提前排程", "臨時急件需要重新估時"],
+    concepts: [
+      { label: "午休界線", aliases: ["午休", "休息時間", "吃飯", "不用休息"] },
+      { label: "臨時排程", aliases: ["臨時", "提前說", "排程", "現在才說"] },
+      { label: "勞動規範", aliases: ["勞基法", "勞工局", "檢舉", "申訴"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "group", text: "下午開會要用的資料呢？中午整理一下，13:00 前丟群組。" },
+      { delayMs: 4200, author: "C同事", conversation: "group", text: "這份早上好像還沒有說今天要用。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🙄", "😡", "❓", "💀"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "format-reference",
+    clock: "週一 13:24",
+    kind: "conflict",
+    headline: "範例突然不算範例",
+    situation: "你照主管提供的參考檔交件，主管卻要求全部重做。",
+    guidance: "指出範例與規格矛盾，要求需求端說明差異與重工成本。",
+    hints: ["內容與範例一致", "要求規格與差異", "拒絕無效重工"],
+    concepts: [
+      { label: "照範例製作", aliases: ["照範例", "參考資料", "一模一樣", "照你給的"] },
+      { label: "標準不一致", aliases: ["雙標", "標準", "前後不一", "規則變來變去"] },
+      { label: "拒絕無效重工", aliases: ["重做", "重工", "浪費時間", "白做"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "group", text: "這個格式誰叫你照參考檔寫的？不能這樣交，全部重弄。" },
+      { delayMs: 3600, author: "B同事", conversation: "group", text: "我上次也是照那份範例交的耶。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🙄", "😅", "❓", "💀"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "scope-creep",
+    clock: "週一 14:08",
+    kind: "conflict",
+    headline: "順便幫忙變成常駐工作",
+    situation: "主管私訊要求你整理行政單位的採購清單，原本工作仍在排程中。",
+    guidance: "切到 A主管私訊，要求釐清權責與優先順序。",
+    hints: ["職務範圍", "權責分工", "請主管決定哪件延後"],
+    concepts: [
+      { label: "職務範圍", aliases: ["職務範圍", "不是我的工作", "行政工作"] },
+      { label: "權責分工", aliases: ["分工", "權責", "誰負責", "找行政"] },
+      { label: "優先順序", aliases: ["優先順序", "先做哪個", "延後", "排程"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "private-a", text: "行政那邊缺人，你順便幫忙整理採購清單，很快。" },
+      { delayMs: 4300, author: "A主管", conversation: "private-a", text: "這個應該不用花你多少時間吧？" },
+    ],
+    expectedConversation: "private-a",
+    acceptedEmoji: ["🙄", "😅", "❓"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "vacation-support",
+    clock: "週一 15:36",
+    kind: "conflict",
+    headline: "別人的出包變成你的假",
+    situation: "你已提前送出特休，主管卻私訊要求你取消請假支援落後單位。",
+    guidance: "要求正式說明駁回依據，並指出出包與人力規劃不是你的責任。",
+    hints: ["事前請假", "他單位責任", "駁回依據"],
+    concepts: [
+      { label: "事前請假", aliases: ["提前請假", "已經申請", "特休", "早就送出"] },
+      { label: "他單位責任", aliases: ["他們出包", "別的單位", "不關我的事", "填洞"] },
+      { label: "駁回依據", aliases: ["駁回依據", "正式說明", "理由", "書面"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "private-a", text: "你下週的假先不要排。隔壁單位進度落後，需要你支援。" },
+      { delayMs: 4600, author: "A主管", conversation: "private-a", text: "大家互相一下，不要每次都講得那麼硬。" },
+    ],
+    expectedConversation: "private-a",
+    acceptedEmoji: ["🙄", "😡", "❓"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "overtime-change",
+    clock: "週一 18:12",
+    kind: "conflict",
+    headline: "下班前五分鐘的急件",
+    situation: "客戶臨時改需求，主管在群組要求今晚完成，沒有提補償。",
+    guidance: "追問加班費、補休與重新估時，不必把變更成本默默吞掉。",
+    hints: ["下班界線", "加班補償", "需求變更應重新估時"],
+    concepts: [
+      { label: "下班界線", aliases: ["下班", "晚上", "明天", "非上班時間"] },
+      { label: "加班補償", aliases: ["加班費", "補休", "報加班", "工時"] },
+      { label: "重新估時", aliases: ["估時", "調整期限", "改需求", "排程"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "group", text: "客戶剛改需求。大家今天先別走，晚上處理完再下班。" },
+      { delayMs: 3900, author: "C同事", conversation: "group", text: "我今晚原本有安排，這算加班嗎？" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🙄", "😡", "💀"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "vague-requirement",
+    clock: "週二 09:05",
+    kind: "conflict",
+    headline: "需求模糊但責任精準",
+    situation: "昨天只有口頭交辦，主管今天看到結果後反問你為何沒先確認。",
+    guidance: "要求書面規格、驗收標準與版本紀錄。",
+    hints: ["需求不清", "書面規格", "保留版本紀錄"],
+    concepts: [
+      { label: "需求不清", aliases: ["需求不清楚", "沒講清楚", "口頭", "沒規格"] },
+      { label: "書面規格", aliases: ["書面", "規格", "文件", "驗收標準"] },
+      { label: "拒絕甩鍋", aliases: ["甩鍋", "怪我", "責任", "不要推給我"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "group", text: "這不是我要的。你做之前怎麼都不先確認？" },
+      { delayMs: 3500, author: "B同事", conversation: "group", text: "昨天會議上好像真的沒有看到規格檔。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🙄", "😅", "❓"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "weekly-report",
+    clock: "週二 10:40",
+    kind: "conflict",
+    headline: "幫一次就變固定班底",
+    situation: "B同事私訊請你再次代做週報，已把一次幫忙當成固定分工。",
+    guidance: "在 B同事私訊釐清分工，說明你也有自己的排程。",
+    hints: ["幫忙不是常態", "回到原負責人", "正式調整分工"],
+    concepts: [
+      { label: "幫忙不是常態", aliases: ["上次幫忙", "不是每次", "幫一次", "不要當常態"] },
+      { label: "回到原負責人", aliases: ["你自己做", "自己處理", "你負責", "不是我負責"] },
+      { label: "自己也有進度", aliases: ["我也有工作", "我的進度", "沒空", "排程"] },
+    ],
+    events: [
+      { delayMs: 0, author: "B同事", conversation: "private-b", text: "你上週做過了比較熟，這次週報也順便幫我弄一下，很快啦。" },
+      { delayMs: 4400, author: "B同事", conversation: "private-b", text: "反正複製貼上就差不多了吧。" },
+    ],
+    expectedConversation: "private-b",
+    acceptedEmoji: ["🙄", "😅", "❓"],
+    allowRead: true,
+    responseAuthor: "B同事",
+    responses: coworkerResponses,
+  },
+  {
+    id: "meeting-progress",
+    clock: "週二 14:20",
+    kind: "conflict",
+    headline: "會議塞滿再問進度",
+    situation: "主管臨時拉你開了兩小時會議，現在又在群組追原定報告。",
+    guidance: "指出時間衝突，請主管決定會議或交付何者優先。",
+    hints: ["會議佔用時間", "排程衝突", "調整期限"],
+    concepts: [
+      { label: "會議佔時", aliases: ["開會", "會議", "兩小時", "佔用時間"] },
+      { label: "排程衝突", aliases: ["衝突", "同時做", "分身", "排程"] },
+      { label: "調整期限", aliases: ["延後", "期限", "晚點交", "重新排"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "group", text: "下午那份報告怎麼還沒看到？這個進度有點慢。" },
+      { delayMs: 3800, author: "C同事", conversation: "group", text: "下午不是都在臨時會議嗎？" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🙄", "💀", "❓"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "blame-shift",
+    clock: "週三 16:10",
+    kind: "conflict",
+    headline: "成果往上收，問題往下丟",
+    situation: "主管認領成果，出問題時卻把決策責任全部切回執行者。",
+    guidance: "要求成果與責任一起計算，拿出決策紀錄拒絕甩鍋。",
+    hints: ["成果責任對等", "決策紀錄", "主管也要承擔"],
+    concepts: [
+      { label: "成果責任對等", aliases: ["成果", "責任", "一起算", "有功", "出事"] },
+      { label: "決策紀錄", aliases: ["紀錄", "版本", "你決定的", "會議紀錄"] },
+      { label: "拒絕甩鍋", aliases: ["甩鍋", "推給我", "背鍋", "你也要負責"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "group", text: "方向是我帶得沒問題。現在這個錯誤是執行細節，你修一下。" },
+      { delayMs: 4100, author: "B同事", conversation: "group", text: "這個方向是上週會議定的沒錯。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🙄", "😡", "💀"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
+  {
+    id: "weekend-support",
+    clock: "週五 16:55",
+    kind: "conflict",
+    headline: "週末支援叫做團隊共識",
+    situation: "主管週五下班前要求大家週末上線，並用團隊共識淡化補償。",
+    guidance: "確認是否正式排班，追問加班補償，拒絕免費待命。",
+    hints: ["週末界線", "正式排班", "加班補償"],
+    concepts: [
+      { label: "週末界線", aliases: ["週末", "休假", "假日", "待命"] },
+      { label: "正式排班", aliases: ["排班", "值班", "輪班", "誰上線"] },
+      { label: "加班補償", aliases: ["加班費", "補休", "工時", "補償"] },
+    ],
+    events: [
+      { delayMs: 0, author: "A主管", conversation: "group", text: "週末大家上線支援一下，團隊共識，不用每件事都算那麼細。" },
+      { delayMs: 3800, author: "C同事", conversation: "group", text: "所以這是正式排班嗎？" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🙄", "😡", "💀"],
+    allowRead: true,
+    responseAuthor: "A主管",
+    responses: managerResponses,
+  },
   {
     id: "drink-order",
-    type: "ambient",
     clock: "週一 12:18",
-    author: "C同事",
-    channel: "group",
-    text: "下午要訂飲料，有要跟的幫我按個表情，我 12:30 一起送單。",
+    kind: "casual",
     headline: "飲料外送揪團",
-    situation: "同事只是揪團訂飲料。這不是戰場，也沒有必要寫一篇立場聲明。",
-    guidance: "已讀即可；要跟團可以用正向或輕鬆表情。",
+    situation: "同事在群組揪飲料。可以閒聊、按 emoji 或只已讀。",
+    guidance: "簡短回覆即可；不用把普通揪團變成攻防戰。",
+    hints: ["可回品項", "可用輕鬆 emoji", "可已讀"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "C同事", conversation: "group", text: "下午要訂飲料，有要跟的幫我說一聲，我 12:30 一起送單。" },
+      { delayMs: 4200, author: "B同事", conversation: "group", text: "我一杯無糖綠，謝謝。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["👍", "🙂", "🙏", "❤️"],
     allowRead: true,
-    acceptedReactions: ["👍", "🙂"],
+    allowSilence: true,
+    friendlyKeywords: ["謝謝", "感謝", "收到", "我要", "一杯", "不用", "跟"],
   },
-  { id: "debate-2", type: "debate", beatId: 2 },
   {
     id: "expense-reminder",
-    type: "ambient",
     clock: "週一 13:40",
-    author: "D行政",
-    channel: "group",
-    text: "提醒大家：本月報帳單據請在明天下午三點前交給我，謝謝。",
+    kind: "notice",
     headline: "行政報帳提醒",
-    situation: "行政同仁只是提醒大家交單據。對這種正常通知按白眼或怒氣，會顯得你把脾氣丟錯人。",
-    guidance: "已讀、按讚或感謝都合適。",
+    situation: "D行政提醒大家交單據。可以已讀、emoji 或簡短回覆。",
+    guidance: "正常通知保持正常語氣；不必對行政窗口發洩。",
+    hints: ["收到", "謝謝提醒", "已讀"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "D行政", conversation: "group", text: "提醒大家：本月報帳單據請在明天下午三點前交給我，謝謝。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["👍", "🙏", "👌"],
     allowRead: true,
-    acceptedReactions: ["👍", "🙏"],
+    allowSilence: true,
+    friendlyKeywords: ["收到", "謝謝", "感謝", "提醒", "好"],
   },
-  { id: "debate-3", type: "debate", beatId: 3 },
   {
-    id: "system-maintenance",
-    type: "ambient",
+    id: "maintenance",
     clock: "週一 14:32",
-    author: "E資訊部",
-    channel: "group",
-    text: "ERP 系統將於 17:30 至 18:00 維護，請提前儲存資料，避免作業中斷。",
+    kind: "notice",
     headline: "系統停機公告",
-    situation: "資訊部預告系統維護。看懂並記住時間即可，不需要在群組額外發揮。",
-    guidance: "已讀最穩妥；按讚表示收到也可以。",
+    situation: "資訊部預告 ERP 維護。可以確認收到，也可以問必要問題。",
+    guidance: "已讀、按讚或簡短詢問都合理。",
+    hints: ["收到", "已讀", "必要時詢問影響"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "E資訊部", conversation: "group", text: "ERP 系統將於 17:30 至 18:00 維護，請提前儲存資料。" },
+      { delayMs: 4000, author: "B同事", conversation: "group", text: "收到，我先把單子存一下。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["👍", "👌", "🙏"],
     allowRead: true,
-    acceptedReactions: ["👍"],
+    allowSilence: true,
+    friendlyKeywords: ["收到", "請問", "謝謝", "好", "了解"],
   },
-  { id: "debate-4", type: "debate", beatId: 4 },
   {
     id: "delivery-arrived",
-    type: "ambient",
     clock: "週一 16:02",
-    author: "C同事",
-    channel: "group",
-    text: "飲料到了，在會議室門口。吸管在右邊紙袋，記得自己拿。",
+    kind: "casual",
     headline: "飲料到貨通知",
-    situation: "飲料已送達。這是一則生活型通知，快速確認即可。",
-    guidance: "已讀或用輕鬆表情回應。",
+    situation: "飲料送達。你可以已讀、道謝或用 emoji 回應。",
+    guidance: "這是生活型通知，輕鬆即可。",
+    hints: ["謝謝", "收到", "emoji"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "C同事", conversation: "group", text: "飲料到了，在會議室門口。吸管在右邊紙袋。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["👍", "🙂", "🙏", "❤️"],
     allowRead: true,
-    acceptedReactions: ["👍", "🙂"],
+    allowSilence: true,
+    friendlyKeywords: ["謝謝", "收到", "感謝", "好"],
   },
-  { id: "debate-5", type: "debate", beatId: 5 },
   {
     id: "meeting-room",
-    type: "ambient",
     clock: "週二 08:52",
-    author: "D行政",
-    channel: "group",
-    text: "十點的大會議室已改到 8F 松山，投影設備剛確認可以正常使用。",
+    kind: "notice",
     headline: "會議室異動",
-    situation: "行政同仁更新開會地點。重點是不要走錯樓層。",
-    guidance: "已讀或按讚表示收到。",
+    situation: "行政更新開會地點。確認不要走錯樓層即可。",
+    guidance: "可以已讀、emoji 或簡短回覆收到。",
+    hints: ["收到", "8F", "謝謝"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "D行政", conversation: "group", text: "十點的大會議室已改到 8F 松山，投影設備剛確認可以正常使用。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["👍", "👌", "🙏"],
     allowRead: true,
-    acceptedReactions: ["👍"],
+    allowSilence: true,
+    friendlyKeywords: ["收到", "謝謝", "了解", "8f"],
   },
-  { id: "debate-6", type: "debate", beatId: 6 },
   {
     id: "lost-umbrella",
-    type: "ambient",
     clock: "週二 09:48",
-    author: "B同事",
-    channel: "group",
-    text: "茶水間有一把黑色折傘，放兩天了。有人知道是誰的嗎？",
+    kind: "casual",
     headline: "茶水間失物招領",
-    situation: "同事在找雨傘主人。你若不知道答案，安靜已讀就好。",
-    guidance: "已讀即可；真的想表示疑惑可以按問號。",
+    situation: "同事在找雨傘主人。知道答案就聊天，不知道也可以已讀。",
+    guidance: "可以問問題、回覆線索或用疑問 emoji。",
+    hints: ["不是我的", "我幫問", "疑問 emoji"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "B同事", conversation: "group", text: "茶水間有一把黑色折傘，放兩天了。有人知道是誰的嗎？" },
+      { delayMs: 4600, author: "C同事", conversation: "group", text: "不是我的，我幫忙問一下。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["❓", "👍", "🙂"],
     allowRead: true,
-    acceptedReactions: ["？"],
+    allowSilence: true,
+    friendlyKeywords: ["不是我的", "我幫", "不知道", "誰的", "問一下"],
   },
-  { id: "debate-7", type: "debate", beatId: 7 },
   {
     id: "birthday-card",
-    type: "ambient",
     clock: "週二 11:25",
-    author: "C同事",
-    channel: "group",
-    text: "今天是 D行政生日，卡片放在我桌上，午休前有空可以來簽一下。",
+    kind: "casual",
     headline: "生日卡片",
-    situation: "同事提醒大家簽生日卡。保持基本社交溫度即可。",
-    guidance: "已讀、按讚或微笑都合適。",
+    situation: "同事提醒大家幫 D行政簽生日卡。",
+    guidance: "可以簡短回覆、祝福、emoji 或只已讀。",
+    hints: ["生日快樂", "等等去簽", "emoji"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "C同事", conversation: "group", text: "今天是 D行政生日，卡片放我桌上，有空可以來簽一下。" },
+      { delayMs: 4100, author: "B同事", conversation: "group", text: "我等等過去簽。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["🎉", "❤️", "👍", "🙂"],
     allowRead: true,
-    acceptedReactions: ["👍", "🙂"],
+    allowSilence: true,
+    friendlyKeywords: ["生日快樂", "等等", "去簽", "收到", "好"],
   },
-  { id: "debate-8", type: "debate", beatId: 8 },
   {
     id: "security-training",
-    type: "ambient",
     clock: "週二 15:12",
-    author: "F人資",
-    channel: "group",
-    text: "資安線上課程將於本週五截止，尚未完成的同仁請記得登入平台觀看。",
+    kind: "notice",
     headline: "資安課程公告",
-    situation: "這是一則例行行政公告。你只需要確認自己是否完成。",
-    guidance: "已讀最合適；按讚表示收到也可以。",
+    situation: "F人資提醒線上課程期限。正常確認即可。",
+    guidance: "可以已讀、按讚或回覆已完成。",
+    hints: ["收到", "已完成", "謝謝提醒"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "F人資", conversation: "group", text: "資安線上課程本週五截止，尚未完成的同仁請記得登入平台觀看。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["👍", "👌", "🙏"],
     allowRead: true,
-    acceptedReactions: ["👍"],
+    allowSilence: true,
+    friendlyKeywords: ["收到", "完成", "謝謝", "好"],
   },
-  { id: "debate-9", type: "debate", beatId: 9 },
   {
     id: "aircon-repair",
-    type: "ambient",
     clock: "週四 10:08",
-    author: "G總務",
-    channel: "group",
-    text: "冷氣廠商預計 14:00 到場檢修，靠窗座位可能會短暫受到影響。",
+    kind: "notice",
     headline: "總務維修通知",
-    situation: "總務提前通知環境維修。這則訊息沒有需要爭論的對象。",
-    guidance: "已讀即可；按讚表示收到也可以。",
+    situation: "G總務提前通知冷氣檢修。",
+    guidance: "正常確認即可，也可以詢問座位影響。",
+    hints: ["收到", "謝謝", "詢問影響"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "G總務", conversation: "group", text: "冷氣廠商預計 14:00 到場檢修，靠窗座位可能會短暫受到影響。" },
+    ],
+    expectedConversation: "group",
+    acceptedEmoji: ["👍", "👌", "🙏"],
     allowRead: true,
-    acceptedReactions: ["👍"],
+    allowSilence: true,
+    friendlyKeywords: ["收到", "謝謝", "請問", "了解"],
   },
-  { id: "debate-10", type: "debate", beatId: 10 },
+  {
+    id: "private-lunch",
+    clock: "週二 11:42",
+    kind: "casual",
+    headline: "午餐私訊",
+    situation: "C同事私訊問你要不要一起訂便當。這是聊天，不是工作判斷題。",
+    guidance: "切到 C同事私訊，自由回覆或用 emoji。",
+    hints: ["一起訂", "不用", "謝謝", "emoji"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "C同事", conversation: "private-c", text: "我等等要訂便當，你要不要一起？今天有椒麻雞。" },
+      { delayMs: 5200, author: "C同事", conversation: "private-c", text: "我要送單前再看一次訊息。" },
+    ],
+    expectedConversation: "private-c",
+    acceptedEmoji: ["👍", "🙂", "🙏", "❤️"],
+    allowRead: true,
+    allowSilence: true,
+    friendlyKeywords: ["要", "不用", "一起", "謝謝", "椒麻雞"],
+    responseAuthor: "C同事",
+    responses: casualResponses,
+  },
+  {
+    id: "private-meeting-vent",
+    clock: "週三 10:36",
+    kind: "casual",
+    headline: "會後吐槽私訊",
+    situation: "B同事私訊吐槽剛結束的冗長會議。你可以接話、emoji 或已讀。",
+    guidance: "這類私訊適合短句連發與輕鬆 emoji。",
+    hints: ["會議太長", "剛剛差點睡著", "emoji"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "B同事", conversation: "private-b", text: "剛剛那個會議到底為什麼可以開兩小時 😂" },
+      { delayMs: 4800, author: "B同事", conversation: "private-b", text: "最後結論不是跟開會前一樣嗎。" },
+    ],
+    expectedConversation: "private-b",
+    acceptedEmoji: ["😂", "💀", "😅", "🙄"],
+    allowRead: true,
+    allowSilence: true,
+    friendlyKeywords: ["真的", "笑死", "兩小時", "結論", "睡著", "一樣"],
+    responseAuthor: "B同事",
+    responses: casualResponses,
+  },
+  {
+    id: "private-dinner",
+    clock: "週四 17:38",
+    kind: "casual",
+    headline: "下班聚餐私訊",
+    situation: "C同事問下班後要不要一起吃飯。",
+    guidance: "自由聊天即可。傳多句短訊息也完全合理。",
+    hints: ["可以", "今天不行", "改天", "emoji"],
+    concepts: [],
+    events: [
+      { delayMs: 0, author: "C同事", conversation: "private-c", text: "等等下班要不要吃拉麵？新開那家好像不用排很久。" },
+    ],
+    expectedConversation: "private-c",
+    acceptedEmoji: ["👍", "🙂", "❤️", "🙏"],
+    allowRead: true,
+    allowSilence: true,
+    friendlyKeywords: ["可以", "好啊", "今天", "改天", "拉麵", "下班"],
+    responseAuthor: "C同事",
+    responses: casualResponses,
+  },
 ];
 
 export const profanityKeywords = [
@@ -452,29 +609,26 @@ export const profanityKeywords = [
   "shit",
 ];
 
+export const hostileEmoji: ReactionEmoji[] = ["🙄", "😡", "💀"];
+
 export const titleTiers: TitleTier[] = [
   {
-    minScore: 7600,
-    title: "職場界線守門員",
-    description: "每一波都抓得到矛盾，訊息發得快，界線也畫得清楚。",
+    minRatio: 0.72,
+    title: "聊天室節奏指揮官",
+    description: "切分頁、接話與反擊都很穩，辦公室通知壓不住你的節奏。",
   },
   {
-    minScore: 6000,
+    minRatio: 0.55,
     title: "群組回覆專員",
-    description: "臨時需求壓不住你，排程、權責與補償都記得追問。",
+    description: "大多數情境都能抓到語氣，短句和 emoji 也用得自然。",
   },
   {
-    minScore: 4200,
-    title: "拒絕加班練習生",
-    description: "已經能守住幾個關鍵點，再把連發節奏磨得更順。",
-  },
-  {
-    minScore: 2400,
+    minRatio: 0.36,
     title: "已讀正在輸入",
-    description: "有幾句回得漂亮，但偶爾還是被臨時需求帶著走。",
+    description: "已經能跟上訊息流，再把聊天室切換與收尾時機磨順一點。",
   },
   {
-    minScore: 0,
+    minRatio: 0,
     title: "辦公室已讀不回",
     description: "今天先關通知，明天再和不合理的排程算帳。",
   },

@@ -1051,17 +1051,106 @@ input::placeholder {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 18rem;
+  grid-template-columns: 13.5rem minmax(0, 1fr) 18rem;
   gap: 1rem;
-  width: min(100% - 2rem, 76rem);
+  width: min(100% - 2rem, 88rem);
   margin: clamp(1.6rem, 4vh, 3.2rem) auto 0;
 }
 
 .chat-card,
-.context-card {
+.context-card,
+.conversation-sidebar {
   background: rgba(17, 22, 22, 0.82);
   border: 1px solid rgba(219, 205, 169, 0.13);
   box-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.16);
+}
+
+.conversation-sidebar {
+  align-self: start;
+  overflow: hidden;
+}
+
+.sidebar-title {
+  padding: 0.95rem;
+  border-bottom: 1px solid rgba(219, 205, 169, 0.09);
+}
+
+.sidebar-title strong {
+  display: block;
+  margin-top: 0.28rem;
+  color: #e7e0d3;
+  font-size: 0.9rem;
+}
+
+.conversation-sidebar button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 2.1rem minmax(0, 1fr);
+  gap: 0.58rem;
+  align-items: center;
+  padding: 0.72rem 0.8rem;
+  color: #9da69f;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(219, 205, 169, 0.06);
+  transition: 160ms ease;
+}
+
+.conversation-sidebar button:hover,
+.conversation-sidebar button.active {
+  color: #e2ebe5;
+  background: rgba(116, 191, 166, 0.1);
+}
+
+.conversation-sidebar button > span:nth-child(2) {
+  min-width: 0;
+}
+
+.conversation-sidebar strong,
+.conversation-sidebar small {
+  display: block;
+}
+
+.conversation-sidebar strong {
+  overflow: hidden;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-sidebar small {
+  overflow: hidden;
+  margin-top: 0.16rem;
+  color: #68736d;
+  font-size: 0.61rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-sidebar i {
+  grid-column: 2;
+  justify-self: start;
+  padding: 0.1rem 0.28rem;
+  color: #f5df9d;
+  font-size: 0.55rem;
+  font-style: normal;
+  background: rgba(198, 147, 55, 0.16);
+  border-radius: 999px;
+}
+
+.tab-avatar {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  grid-row: span 2;
+  place-items: center;
+  color: #cde1d8;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  background: rgba(116, 191, 166, 0.13);
+  border: 1px solid rgba(116, 191, 166, 0.23);
 }
 
 .chat-card {
@@ -1256,6 +1345,32 @@ input::placeholder {
   padding: 0.9rem 1.1rem 1rem;
 }
 
+.emoji-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.58rem;
+}
+
+.emoji-picker button {
+  min-width: 2rem;
+  padding: 0.28rem 0.42rem;
+  font-size: 0.86rem;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(219, 205, 169, 0.13);
+  transition: 140ms ease;
+}
+
+.emoji-picker button:hover {
+  background: rgba(116, 191, 166, 0.13);
+  border-color: rgba(116, 191, 166, 0.34);
+}
+
+.emoji-picker button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
 .composer-meta,
 .composer-actions {
   display: flex;
@@ -1302,6 +1417,12 @@ input::placeholder {
   color: #ded9ce;
   background: transparent;
   border: 1px solid rgba(219, 205, 169, 0.2);
+}
+
+.composer-actions .read-button {
+  color: #b9d9ce;
+  background: rgba(116, 191, 166, 0.06);
+  border: 1px solid rgba(116, 191, 166, 0.24);
 }
 
 .composer-actions button:disabled {
@@ -1387,11 +1508,20 @@ input::placeholder {
 
 @media (max-width: 860px) {
   .conversation-layout {
-    display: block;
+    grid-template-columns: 1fr;
   }
 
   .context-card {
     margin-top: 0.8rem;
+  }
+
+  .conversation-sidebar {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .sidebar-title {
+    grid-column: 1 / -1;
   }
 
   .chat-feed {
@@ -1439,10 +1569,16 @@ input::placeholder {
   }
 
   .composer-actions div {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     margin-top: 0.55rem;
   }
 
   .composer-actions button {
     flex: 1;
+  }
+
+  .conversation-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

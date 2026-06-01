@@ -1,142 +1,257 @@
 import {
   RESPONSE_SECONDS,
+  hostileEmoji,
   profanityKeywords,
   type AcceptedConcept,
-  type DialogueBeat,
-  type PlayerChannel,
+  type ChatScene,
+  type PlayerConversationId,
+  type ReactionEmoji,
   type ReplyTier,
 } from "../data/officeContent";
 
-export interface ReplyFragment {
+export type FragmentKind = "text" | "emoji" | "read";
+
+export interface ChatFragment {
   text: string;
   sentAtSeconds: number;
-  channel: PlayerChannel;
+  conversation: PlayerConversationId;
+  kind: FragmentKind;
 }
 
-export interface ScoreBreakdown {
-  reaction: number;
-  tempo: number;
-  substance: number;
-  concepts: number;
-  channel: number;
-  penalties: number;
-}
-
-export interface RoundScore {
+export interface SceneScore {
   total: number;
-  breakdown: ScoreBreakdown;
+  maxScore: number;
   reactionSeconds: number;
-  averageGapSeconds: number;
-  characterCount: number;
   messageCount: number;
   matchedConcepts: string[];
-  expectedChannel: PlayerChannel;
-  reachedExpectedChannel: boolean;
-  isOffTopic: boolean;
+  reachedExpectedConversation: boolean;
   hasProfanity: boolean;
-  isTimeout: boolean;
-  scriptReply: string;
+  correct: boolean;
+  feedback: string;
+  scriptReply?: string;
 }
 
 const normalize = (text: string) =>
   text.toLowerCase().replace(/[\s，。！？、,.!?：:；;「」『』（）()[\]{}]/g, "");
 
-const choose = (options: string[], seed: number) => options[seed % options.length];
-
-const calculateTempo = (fragments: ReplyFragment[]) => {
-  if (fragments.length < 2) return { points: 0, averageGapSeconds: 0 };
-
-  const gaps = fragments
-    .slice(1)
-    .map((fragment, index) => fragment.sentAtSeconds - fragments[index].sentAtSeconds);
-  const averageGapSeconds = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
-  const burstPoints = Math.min(90, (fragments.length - 1) * 30);
-  const speedPoints =
-    averageGapSeconds <= 0.8
-      ? 50
-      : averageGapSeconds <= 1.5
-        ? 30
-        : averageGapSeconds <= 2.5
-          ? 15
-          : 0;
-
-  return { points: burstPoints + speedPoints, averageGapSeconds };
-};
+const choose = (options: string[] | undefined, seed: number) =>
+  options && options.length > 0 ? options[seed % options.length] : undefined;
 
 const conceptMatches = (reply: string, concept: AcceptedConcept) =>
   concept.aliases.some((alias) => reply.includes(normalize(alias)));
 
-const chooseTier = (score: number): ReplyTier => {
-  if (score >= 720) return "excellent";
-  if (score >= 420) return "good";
+const calculateTempo = (fragments: ChatFragment[]) => {
+  const messages = fragments.filter((fragment) => fragment.kind !== "read");
+  if (messages.length < 2) return 0;
+
+  const gaps = messages
+    .slice(1)
+    .map((fragment, index) => fragment.sentAtSeconds - messages[index].sentAtSeconds);
+  const averageGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+  const burst = Math.min(100, (messages.length - 1) * 22);
+  const speed = averageGap <= 0.9 ? 55 : averageGap <= 1.8 ? 35 : averageGap <= 3 ? 18 : 0;
+
+  return burst + speed;
+};
+
+const chooseTier = (ratio: number): ReplyTier => {
+  if (ratio >= 0.72) return "excellent";
+  if (ratio >= 0.44) return "good";
   return "weak";
 };
 
-export function scoreReply(
-  fragments: ReplyFragment[],
-  beat: DialogueBeat,
-  endedByTimeout = false,
-): RoundScore {
-  // No separators: split phrases such as "資 / 遣 / 費" still form one reply.
-  const reply = normalize(fragments.map((fragment) => fragment.text.trim()).join(""));
-  const characterCount = reply.length;
-  const matchedConcepts = beat.concepts
-    .filter((concept) => conceptMatches(reply, concept))
+export const getSceneMaxScore = (scene: ChatScene) =>
+  scene.kind === "conflict" ? 1000 : scene.kind === "casual" ? 480 : 360;
+
+const scoreConflict = (
+  fragments: ChatFragment[],
+  scene: ChatScene,
+  endedByTimeout: boolean,
+): SceneScore => {
+  const maxScore = getSceneMaxScore(scene);
+  const relevant = fragments.filter(
+    (fragment) => fragment.conversation === scene.expectedConversation,
+  );
+  const textReply = normalize(
+    relevant
+      .filter((fragment) => fragment.kind === "text")
+      .map((fragment) => fragment.text)
+      .join(""),
+  );
+  const matchedConcepts = scene.concepts
+    .filter((concept) => conceptMatches(textReply, concept))
     .map((concept) => concept.label);
   const hasProfanity = profanityKeywords.some((keyword) =>
-    reply.includes(normalize(keyword)),
+    textReply.includes(normalize(keyword)),
   );
-  const reachedExpectedChannel = fragments.some(
-    (fragment) => fragment.channel === beat.expectedChannel,
-  );
-  const isTimeout = endedByTimeout && fragments.length === 0;
-  const isOffTopic = characterCount > 0 && matchedConcepts.length === 0;
   const reactionSeconds = fragments[0]?.sentAtSeconds ?? RESPONSE_SECONDS;
-  const { points: tempo, averageGapSeconds } = calculateTempo(fragments);
-
+  const reachedExpectedConversation = relevant.length > 0;
+  const wrongConversationCount = fragments.length - relevant.length;
+  const acceptedEmojiCount = relevant.filter(
+    (fragment) =>
+      fragment.kind === "emoji" &&
+      scene.acceptedEmoji.includes(fragment.text as ReactionEmoji),
+  ).length;
+  const characterCount = textReply.length;
+  const offTopic = characterCount > 0 && matchedConcepts.length === 0;
   const reaction =
     fragments.length === 0
       ? 0
-      : Math.round(
-          190 * Math.max(0, (RESPONSE_SECONDS - reactionSeconds) / RESPONSE_SECONDS),
-        );
-  const substance =
-    characterCount === 0
-      ? 0
-      : Math.min(characterCount, 30) * 5 -
-        Math.max(0, characterCount - 52) * 4;
-  const concepts = Math.min(matchedConcepts.length, 3) * 150;
-  const channel = reachedExpectedChannel ? 100 : fragments.length > 0 ? -140 : 0;
-  const penalties = (isOffTopic ? -120 : 0) + (hasProfanity ? -220 : 0);
+      : Math.round(175 * Math.max(0, (RESPONSE_SECONDS - reactionSeconds) / RESPONSE_SECONDS));
+  const tempo = calculateTempo(relevant);
+  const substance = Math.min(characterCount, 42) * 5;
+  const concepts = Math.min(matchedConcepts.length, 3) * 155;
+  const tone = Math.min(acceptedEmojiCount, 3) * 22;
+  const channel = reachedExpectedConversation ? 95 : fragments.length > 0 ? -160 : 0;
+  const penalties =
+    wrongConversationCount * -45 + (offTopic ? -100 : 0) + (hasProfanity ? -70 : 0);
   const total = Math.max(
     0,
-    Math.min(1000, reaction + tempo + substance + concepts + channel + penalties),
+    Math.min(maxScore, reaction + tempo + substance + concepts + tone + channel + penalties),
   );
-
-  const responseType =
+  const correct =
+    reachedExpectedConversation &&
+    matchedConcepts.length > 0 &&
+    total >= Math.round(maxScore * 0.3);
+  const responseType: ReplyTier =
     fragments.length === 0
       ? "silence"
-      : !reachedExpectedChannel
+      : !reachedExpectedConversation
         ? "wrongChannel"
-        : chooseTier(total);
-  const scriptReply = choose(
-    beat.responses[responseType],
-    beat.id + characterCount + fragments.length,
-  );
+        : chooseTier(total / maxScore);
+  const feedback =
+    fragments.length === 0
+      ? endedByTimeout
+        ? "時間到，這波沒有送出任何回應"
+        : "你選擇不回應這個不合理要求"
+      : [
+          matchedConcepts.length > 0
+            ? `命中：${matchedConcepts.join("、")}`
+            : "沒有打中矛盾核心",
+          reachedExpectedConversation ? "聊天室正確" : "聊天室錯誤",
+          hasProfanity ? "語氣過重略扣分" : null,
+        ]
+          .filter(Boolean)
+          .join("｜");
 
   return {
     total,
-    breakdown: { reaction, tempo, substance, concepts, channel, penalties },
+    maxScore,
     reactionSeconds,
-    averageGapSeconds,
-    characterCount,
     messageCount: fragments.length,
     matchedConcepts,
-    expectedChannel: beat.expectedChannel,
-    reachedExpectedChannel,
-    isOffTopic,
+    reachedExpectedConversation,
     hasProfanity,
-    isTimeout,
-    scriptReply,
+    correct,
+    feedback,
+    scriptReply: choose(scene.responses?.[responseType], scene.id.length + characterCount),
   };
+};
+
+const scoreConversation = (
+  fragments: ChatFragment[],
+  scene: ChatScene,
+  endedByTimeout: boolean,
+): SceneScore => {
+  const maxScore = getSceneMaxScore(scene);
+  const relevant = fragments.filter(
+    (fragment) => fragment.conversation === scene.expectedConversation,
+  );
+  const textReply = normalize(
+    relevant
+      .filter((fragment) => fragment.kind === "text")
+      .map((fragment) => fragment.text)
+      .join(""),
+  );
+  const emojiReplies = relevant.filter((fragment) => fragment.kind === "emoji");
+  const acceptedEmojiCount = emojiReplies.filter((fragment) =>
+    scene.acceptedEmoji.includes(fragment.text as ReactionEmoji),
+  ).length;
+  const hostileEmojiCount = emojiReplies.filter((fragment) =>
+    hostileEmoji.includes(fragment.text as ReactionEmoji),
+  ).length;
+  const readCount = relevant.filter((fragment) => fragment.kind === "read").length;
+  const friendlyHit = (scene.friendlyKeywords ?? []).some((keyword) =>
+    textReply.includes(normalize(keyword)),
+  );
+  const hasProfanity = profanityKeywords.some((keyword) =>
+    textReply.includes(normalize(keyword)),
+  );
+  const reachedExpectedConversation = relevant.length > 0;
+  const reactionSeconds = fragments[0]?.sentAtSeconds ?? RESPONSE_SECONDS;
+  const wrongConversationCount = fragments.length - relevant.length;
+  const reaction =
+    fragments.length === 0
+      ? scene.allowSilence
+        ? 80
+        : 0
+      : Math.round(95 * Math.max(0, (RESPONSE_SECONDS - reactionSeconds) / RESPONSE_SECONDS));
+  const read = scene.allowRead && readCount > 0 ? 95 : 0;
+  const emoji = Math.min(acceptedEmojiCount, 3) * 48;
+  const text =
+    textReply.length === 0
+      ? 0
+      : scene.kind === "casual"
+        ? 75 + Math.min(textReply.length, 24) * 4 + (friendlyHit ? 45 : 0)
+        : 50 + Math.min(textReply.length, 14) * 3 + (friendlyHit ? 40 : 0);
+  const tempo = Math.min(70, calculateTempo(relevant));
+  const overReplyLimit = scene.kind === "notice" ? 3 : 6;
+  const penalties =
+    wrongConversationCount * -55 +
+    hostileEmojiCount * -75 +
+    (hasProfanity ? -190 : 0) +
+    Math.max(0, relevant.length - overReplyLimit) * -28;
+  const total = Math.max(0, Math.min(maxScore, reaction + read + emoji + text + tempo + penalties));
+  const correct =
+    (reachedExpectedConversation || (fragments.length === 0 && Boolean(scene.allowSilence))) &&
+    !hasProfanity &&
+    hostileEmojiCount === 0 &&
+    wrongConversationCount === 0;
+  const responseType: ReplyTier =
+    fragments.length === 0
+      ? "silence"
+      : !reachedExpectedConversation
+        ? "wrongChannel"
+        : chooseTier(total / maxScore);
+  const feedback =
+    fragments.length === 0
+      ? endedByTimeout
+        ? scene.allowSilence
+          ? "時間到，這則保持安靜也算合理"
+          : "時間到，沒有做出回應"
+        : "你選擇不回覆"
+      : [
+          reachedExpectedConversation ? "聊天室正確" : "聊天室錯誤",
+          acceptedEmojiCount > 0 ? `合宜 emoji × ${acceptedEmojiCount}` : null,
+          friendlyHit ? "文字語氣自然" : textReply.length > 0 ? "已記錄文字回覆" : null,
+          hostileEmojiCount > 0 || hasProfanity ? "普通聊天不需要開戰" : null,
+        ]
+          .filter(Boolean)
+          .join("｜");
+
+  return {
+    total,
+    maxScore,
+    reactionSeconds,
+    messageCount: fragments.length,
+    matchedConcepts: [],
+    reachedExpectedConversation,
+    hasProfanity,
+    correct,
+    feedback,
+    scriptReply:
+      fragments.length > 0
+        ? choose(scene.responses?.[responseType], scene.id.length + textReply.length)
+        : undefined,
+  };
+};
+
+export function scoreScene(
+  fragments: ChatFragment[],
+  scene: ChatScene,
+  endedByTimeout = false,
+): SceneScore {
+  return scene.kind === "conflict"
+    ? scoreConflict(fragments, scene, endedByTimeout)
+    : scoreConversation(fragments, scene, endedByTimeout);
 }
